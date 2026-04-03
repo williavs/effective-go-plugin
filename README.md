@@ -2,9 +2,45 @@
 
 A Claude Code plugin that teaches Claude to think like a Go developer before writing code.
 
+## Install
+
+**Option 1: Add as marketplace + install (recommended)**
+```bash
+claude plugin marketplace add https://github.com/williavs/effective-go-plugin
+claude plugin install effective-go
+```
+
+**Option 2: Direct plugin directory**
+```bash
+claude --plugin-dir /path/to/effective-go-plugin
+```
+
+**Option 3: Manual**
+```bash
+git clone https://github.com/williavs/effective-go-plugin ~/.claude/plugins/effective-go
+```
+
+After installing, restart Claude Code or run `/reload-plugins`.
+
+## Quick Start
+
+Just write Go. The skill auto-triggers on any Go code request. No slash command needed.
+
+```
+> build me a simple http server with middleware support
+```
+
+The skill silently guides Claude toward idiomatic Go architecture -- zero-value usable types, consumer-defined interfaces, proper error flow, correct concurrency patterns.
+
+To explicitly review existing Go code:
+```
+> review my go code
+```
+This launches the `go-reviewer` agent which runs deterministic analysis + design review.
+
 ## The Problem
 
-Claude writes Go that compiles and runs but isn't architecturally tasteful. It reads like translated Java or Python -- technically correct but missing the design thinking that experienced Go developers do before typing.
+Claude writes Go that compiles but isn't architecturally tasteful. It reads like translated Java/Python -- technically correct but missing the design thinking that experienced Go developers do instinctively.
 
 The surface-level stuff (formatting, naming, syntax) is already fine. The gap is in:
 
@@ -16,7 +52,7 @@ The surface-level stuff (formatting, naming, syntax) is already fine. The gap is
 
 ## What This Plugin Does
 
-Instead of giving Claude a checklist of rules, it teaches the **thinking process** that happens in a Go developer's head before they write code:
+Instead of a checklist of rules, it teaches the **thinking process** that happens in a Go developer's head:
 
 1. **Type Design** -- "What happens with `var x T`? Is the zero value useful?"
 2. **Interface Discovery** -- "What methods does this function actually call? Define that as the interface."
@@ -24,57 +60,51 @@ Instead of giving Claude a checklist of rules, it teaches the **thinking process
 4. **Data Flow** -- "Who owns this data? Does ownership transfer between goroutines?"
 5. **Error Flow** -- "What's the shape of this function? Happy path on the left edge."
 
-Plus 8 hard rules that Go developers never violate (no `os.Exit` outside main, no hand-rolled sorts, no leaked concrete types in interfaces, etc.).
-
-## Installation
-
-```bash
-# Clone into your Claude Code plugins directory
-cd ~/.claude/plugins
-git clone https://github.com/willyvansickle/effective-go-plugin.git effective-go
-```
-
-Or install via the Claude Code plugin system.
+Plus 8 hard rules that Go developers never violate:
+- No `os.Exit()` outside `main()`
+- No hand-rolled sorting (`sort.Slice` exists)
+- Interface methods don't return concrete implementation types
+- Named types for closed value sets (not raw strings)
+- `encoding/json` for structured data (not custom delimiters)
+- Standard library first (check `sort`, `slices`, `strings`, `bytes`, `maps` before writing loops)
+- Never silently discard errors
+- Domain types use correct Go types (`int` for ports, `time.Time` for timestamps)
 
 ## What's Included
 
-### Skill: `effective-go`
-
-Auto-triggers whenever you're writing Go code. Teaches design-first patterns from the Effective Go guide.
-
-- `skills/effective-go/SKILL.md` -- Core design thinking process (~200 lines)
-- `skills/effective-go/references/effective-go-patterns.md` -- Full pattern reference with edge cases
-
-### Agent: `go-reviewer`
-
-Invoke with "review my go code" or trigger proactively after writing Go. Runs deterministic analysis + design review.
-
-### Analysis Script
-
-`skills/effective-go/scripts/analyze.sh` -- Deterministic Go code grader. Checks:
-
-- Compilation (`go build`)
-- `go vet` cleanliness
-- Anti-pattern detection (GetFoo getters, os.Exit outside main, silent error discards, string-typed ports, raw string enums)
-- Code metrics (lines, files, packages, interfaces)
-
-Outputs JSON. No dependencies beyond bash and the Go toolchain.
+| Component | Path | Description |
+|-----------|------|-------------|
+| Skill | `skills/effective-go/SKILL.md` | Auto-triggering design thinking guide |
+| Reference | `skills/effective-go/references/` | Full Effective Go pattern reference |
+| Agent | `agents/go-reviewer.md` | On-demand code review agent |
+| Analysis | `skills/effective-go/scripts/analyze.sh` | Deterministic Go code grader (JSON output) |
+| Benchmarks | `benchmarks/` | Raw data from 10-prompt evaluation |
 
 ## Benchmarks
 
 See [benchmarks/BENCHMARK.md](benchmarks/BENCHMARK.md) for full results.
 
-**Key finding:** The skill's biggest measurable impact is on interface usage. Without the skill, 10% of projects define interfaces. With the skill, 56% do -- even from very vague prompts like "go key value store thing with ttl."
+**Key finding:** Interface usage jumps from 10% to 56% of projects with the skill. This holds even on very vague prompts like "go key value store thing with ttl."
 
 The skill works regardless of prompt quality. Non-coders get the same architectural improvements as developers who know to ask for "idiomatic Go."
 
+| Metric | Without Skill | With Skill |
+|--------|--------------|------------|
+| Compiles | 100% | 100% |
+| Vet clean | 100% | 100% |
+| Projects with interfaces | 10% | 56% |
+| Avg lines of code | 257 | 277 |
+
 ## Development
 
-Based on the official [Effective Go](https://go.dev/doc/effective_go) guide, iterated through 3 rounds of testing:
+Based on the official [Effective Go](https://go.dev/doc/effective_go) guide. Iterated through 4 rounds:
 
 1. **V1 (pattern checklist):** +11% on LLM-graded assertions. Only helped surface-level stuff.
-2. **V2 (design thinking):** +15% advantage, cracked zero-value design and interface placement for the first time.
-3. **V3 (+ hard rules):** Added 8 concrete rules from deep code review. Tested across 10 prompts with quality gradient (clean to very vague).
+2. **V2 (design thinking):** +15% advantage. Cracked zero-value design and interface placement.
+3. **V3 (+ hard rules):** 8 concrete rules from deep code review. 10 prompts, clean to very vague.
+4. **V4 (anti-paralysis):** Fixed "planning paralysis" on vague prompts. Embedding guidance.
+
+All evaluation data (deterministic analysis JSON, raw Go outputs) available in `benchmarks/`.
 
 ## License
 

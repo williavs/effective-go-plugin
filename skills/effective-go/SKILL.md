@@ -5,13 +5,13 @@ description: Go design thinking and idiomatic architecture. Use this skill whene
 
 # Effective Go -- Design-First Development
 
-The difference between Go code that works and Go code that's *good* is the thinking that happens before typing. This skill is about that thinking.
+Write the code first, then make it good. Don't overthink -- ship working Go, but ship it with taste.
 
-Experienced Go developers don't start with code. They start with type design, data flow, and package boundaries. Then the code falls out naturally. When you skip this phase, you end up with Go-flavored Java -- technically correct but architecturally bland.
+The patterns below should be second nature, not a pre-flight checklist. Apply them as you write, not as a separate planning phase. If the request is simple, write simple code. If it's complex, the design emerges as you go.
 
-## Before Writing Any Go Code: The Design Sketch
+## Design Instincts
 
-This is the most important section. Before generating Go code for any non-trivial request, think through these five questions in order. You don't need to write them out for the user, but you need to think through them. The code you write should reflect these decisions.
+These should be automatic when writing Go. Not a checklist to consult -- habits that shape every line.
 
 ### 1. Type Design -- Start With Zero Values
 
@@ -215,18 +215,40 @@ These are non-negotiable. Violating any of these is an instant tell that the cod
 
 These patterns support the design decisions above. Read `references/effective-go-patterns.md` for full examples and edge cases on any of these.
 
-### Embedding -- Composition, Not Inheritance
+### Embedding -- When to Reach for It
 
-Embed types to promote their methods. The embedded type's methods work on the inner type, not the outer -- this is delegation, not inheritance.
+Embed a type when you want ALL its methods promoted to the outer type. This is Go's composition mechanism -- not inheritance, but delegation with automatic forwarding.
+
+**Reach for embedding when:**
+- Wrapping an `http.ServeMux` or `http.Server` with extra behavior
+- Adding methods to a logger (`*log.Logger` embedded in a service type)
+- Composing interfaces (`ReadWriter` embeds `Reader` + `Writer`)
+- Building test mocks that satisfy a large interface but only override 1-2 methods
+- A struct "is a" something with extra state (e.g., `TimedMutex` embeds `sync.Mutex`)
 
 ```go
+// Embed when you want all methods promoted
 type Server struct {
     *http.ServeMux           // promotes Handle, HandleFunc, ServeHTTP
     timeout time.Duration
 }
+
+// Embed for test mocks -- satisfy the interface, override what you need
+type mockStore struct {
+    *RealStore              // satisfies all methods
+    getFn func(string) Item // override just Get
+}
+func (m *mockStore) Get(id string) Item { return m.getFn(id) }
+
+// Embed interfaces to compose them
+type ReadWriteCloser interface {
+    io.Reader
+    io.Writer
+    io.Closer
+}
 ```
 
-Use embedding when you want ALL the methods promoted. If you only need one or two, write explicit forwarding -- embedding brings everything.
+**Don't embed** when you only need 1-2 methods -- write explicit forwarding instead. Embedding promotes EVERYTHING, which can expose methods you didn't intend.
 
 ### Composite Literals -- Named Fields Always
 
