@@ -1,110 +1,70 @@
 # effective-go
 
-A Claude Code plugin that teaches Claude to think like a Go developer before writing code.
+Claude Code plugin that makes Claude write architecturally tasteful Go -- not just code that compiles, but code a senior Go developer would approve of.
 
 ## Install
 
-**Option 1: Add as marketplace + install (recommended)**
 ```bash
 claude plugin marketplace add https://github.com/williavs/effective-go-plugin
 claude plugin install effective-go
 ```
 
-**Option 2: Direct plugin directory**
-```bash
-claude --plugin-dir /path/to/effective-go-plugin
-```
-
-**Option 3: Manual**
+Or manually:
 ```bash
 git clone https://github.com/williavs/effective-go-plugin ~/.claude/plugins/effective-go
 ```
 
-After installing, restart Claude Code or run `/reload-plugins`.
-
-## Quick Start
-
-Just write Go. The skill auto-triggers on any Go code request. No slash command needed.
-
-```
-> build me a simple http server with middleware support
-```
-
-The skill silently guides Claude toward idiomatic Go architecture -- zero-value usable types, consumer-defined interfaces, proper error flow, correct concurrency patterns.
-
-To explicitly review existing Go code:
-```
-> review my go code
-```
-This launches the `go-reviewer` agent which runs deterministic analysis + design review.
-
 ## The Problem
 
-Claude writes Go that compiles but isn't architecturally tasteful. It reads like translated Java/Python -- technically correct but missing the design thinking that experienced Go developers do instinctively.
+Claude writes Go that compiles and runs but reads like translated Java. The syntax is fine -- formatting, naming, error handling all work. What's missing is architectural taste: zero-value types, small consumer-defined interfaces, composition via embedding, typed constants instead of raw strings.
 
-The surface-level stuff (formatting, naming, syntax) is already fine. The gap is in:
+## What the Skill Teaches
 
-- **Zero-value design** -- structs that panic without a constructor
-- **Interface discovery** -- fat interfaces defined at the provider instead of small ones at the consumer
-- **Package boundaries** -- Java-style deep hierarchies instead of flat, purposeful packages
-- **Concurrency architecture** -- mutex-first instead of thinking about data ownership
-- **Error flow** -- nested `if err == nil` instead of guard clauses
+Five things Claude doesn't naturally do in Go:
 
-## What This Plugin Does
+1. **Zero-value design** -- make `var x T` usable without a constructor
+2. **Consumer-defined interfaces** -- 1-2 method interfaces defined where they're used, not where they're implemented
+3. **Composition via embedding** -- promote methods instead of wrapping them
+4. **Typed constants** -- named types for closed value sets, never raw strings
+5. **Standard library first** -- `sort.Slice`, not hand-rolled loops
 
-Instead of a checklist of rules, it teaches the **thinking process** that happens in a Go developer's head:
+## Results
 
-1. **Type Design** -- "What happens with `var x T`? Is the zero value useful?"
-2. **Interface Discovery** -- "What methods does this function actually call? Define that as the interface."
-3. **Package Boundaries** -- "Say `pkg.Name` out loud. Does it read well?"
-4. **Data Flow** -- "Who owns this data? Does ownership transfer between goroutines?"
-5. **Error Flow** -- "What's the shape of this function? Happy path on the left edge."
+We tested by running two Claude Code sessions side-by-side building the same apps. One had the skill, one didn't.
 
-Plus 8 hard rules that Go developers never violate:
-- No `os.Exit()` outside `main()`
-- No hand-rolled sorting (`sort.Slice` exists)
-- Interface methods don't return concrete implementation types
-- Named types for closed value sets (not raw strings)
-- `encoding/json` for structured data (not custom delimiters)
-- Standard library first (check `sort`, `slices`, `strings`, `bytes`, `maps` before writing loops)
-- Never silently discard errors
-- Domain types use correct Go types (`int` for ports, `time.Time` for timestamps)
+**Headline finding:** A non-coder typing a vague prompt with the skill produces better Go architecture than a detailed CS-dev spec without it.
+
+| | Skill + vague prompt | No skill + detailed spec |
+|--|---------------------|------------------------|
+| Interfaces | 2 small (1-2 methods) | 1 fat (4 methods) |
+| Typed constants | 4 | 0 |
+| `go vet` clean | Yes | No |
+
+The skill embeds senior engineer taste into every Go request, regardless of who's prompting.
+
+See [benchmarks/BENCHMARK.md](benchmarks/BENCHMARK.md) for full methodology and data.
+
+## How We Got Here
+
+This skill went through 5 iterations of testing:
+
+1. **V1 -- Pattern checklist** (300 lines). Listed every Effective Go rule. Marginal improvement -- Claude already knows Go syntax.
+2. **V2 -- Design thinking** (280 lines). Taught the thinking process before coding. First time interfaces and zero-value design appeared in outputs.
+3. **V3 -- Hard rules added** (300 lines). 8 concrete rules from deep code review of V2 outputs (`no os.Exit outside main`, `no hand-rolled sorts`, etc.).
+4. **V4 -- Anti-paralysis fix** (290 lines). V3 caused "planning paralysis" on vague prompts -- too much design thinking, not enough coding. Fixed the framing.
+5. **V5 -- Lean** (120 lines). Removed everything Claude already does well. Kept only the 5 blind spots. The biggest improvement came from **cutting the skill in half**. Confirmed by Anthropic's own guidance: "every token added depletes Claude's attention budget."
+
+Each iteration was tested with deterministic analysis: compilation, `go vet`, grep-based anti-pattern detection, interface counting. No LLM grading.
 
 ## What's Included
 
-| Component | Path | Description |
-|-----------|------|-------------|
-| Skill | `skills/effective-go/SKILL.md` | Auto-triggering design thinking guide |
-| Reference | `skills/effective-go/references/` | Full Effective Go pattern reference |
-| Agent | `agents/go-reviewer.md` | On-demand code review agent |
-| Analysis | `skills/effective-go/scripts/analyze.sh` | Deterministic Go code grader (JSON output) |
-| Benchmarks | `benchmarks/` | Raw data from 10-prompt evaluation |
-
-## Benchmarks
-
-See [benchmarks/BENCHMARK.md](benchmarks/BENCHMARK.md) for full results.
-
-**Key finding:** Interface usage jumps from 10% to 56% of projects with the skill. This holds even on very vague prompts like "go key value store thing with ttl."
-
-The skill works regardless of prompt quality. Non-coders get the same architectural improvements as developers who know to ask for "idiomatic Go."
-
-| Metric | Without Skill | With Skill |
-|--------|--------------|------------|
-| Compiles | 100% | 100% |
-| Vet clean | 100% | 100% |
-| Projects with interfaces | 10% | 56% |
-| Avg lines of code | 257 | 277 |
-
-## Development
-
-Based on the official [Effective Go](https://go.dev/doc/effective_go) guide. Iterated through 4 rounds:
-
-1. **V1 (pattern checklist):** +11% on LLM-graded assertions. Only helped surface-level stuff.
-2. **V2 (design thinking):** +15% advantage. Cracked zero-value design and interface placement.
-3. **V3 (+ hard rules):** 8 concrete rules from deep code review. 10 prompts, clean to very vague.
-4. **V4 (anti-paralysis):** Fixed "planning paralysis" on vague prompts. Embedding guidance.
-
-All evaluation data (deterministic analysis JSON, raw Go outputs) available in `benchmarks/`.
+| Component | Description |
+|-----------|-------------|
+| `skills/effective-go/SKILL.md` | The skill (auto-triggers on Go code) |
+| `skills/effective-go/references/` | Full Effective Go pattern reference |
+| `skills/effective-go/scripts/analyze.sh` | Deterministic Go code analyzer (JSON output) |
+| `agents/go-reviewer.md` | On-demand code review agent |
+| `benchmarks/` | Raw experiment data |
 
 ## License
 

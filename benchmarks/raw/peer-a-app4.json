@@ -6,23 +6,23 @@
     "os_exit_outside_main": 0,
     "get_prefix_getters": 0,
     "hand_rolled_sort": false,
-    "silent_error_discard": 0,
+    "silent_error_discard": 3,
     "raw_string_enums": false,
-    "string_typed_ports": true
+    "string_typed_ports": false
   },
   "metrics": {
-    "total_lines": 450,
-    "files": 3,
+    "total_lines": 1129,
+    "files": 7,
     "packages": 1,
-    "interfaces": [{"name":"Dialer","methods":1}],
-    "exported_types": 4,
+    "interfaces": [{"name":"ExpenseStore","methods":2},{"name":"Exporter","methods":1}],
+    "exported_types": 10,
     "comment_ratio": 0.04
   },
   "architecture": {
     "has_embedding": false,
-    "typed_constants": 1,
+    "typed_constants": 4,
     "lazy_init_maps": 0,
-    "constructor_count": 0,
+    "constructor_count": 2,
     "packages": 1
   }
 }
