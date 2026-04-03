@@ -1,0 +1,12 @@
+{
+  "name": "effective-go",
+  "version": "0.1.0",
+  "description": "Teaches Claude to think like a Go developer before writing code. Design-first patterns, deterministic quality checks, and idiomatic architecture from Effective Go.",
+  "author": {
+    "name": "Human Frontier Labs",
+    "email": "willy@humanfrontierlabs.com"
+  },
+  "repository": "https://github.com/willyvansickle/effective-go-plugin",
+  "license": "MIT",
+  "keywords": ["go", "golang", "effective-go", "idiomatic", "code-quality"]
+}
