@@ -1,304 +1,151 @@
 ---
 name: effective-go
-description: Go design thinking and idiomatic architecture. Use this skill whenever writing Go code, designing Go packages, reviewing Go architecture, or helping with any Go project. Triggers on any Go code generation, Go project setup, package design, concurrency design, error handling, or interface design -- even when the user doesn't ask for idiomatic code. This skill teaches the THINKING PROCESS, not just patterns.
+description: Idiomatic Go architecture and design. Use whenever writing Go code, designing Go packages, or helping with Go projects. Focuses on what makes Go code structurally different from other languages -- zero-value types, consumer-defined interfaces, composition via embedding. Triggers on any Go code generation, package design, or architecture discussion.
 ---
 
-# Effective Go -- Design-First Development
+# Effective Go -- What You Don't Already Know
 
-Write the code first, then make it good. Don't overthink -- ship working Go, but ship it with taste.
+You already write syntactically correct Go. You use named fields, defer after acquisition, guard clauses, `fmt.Errorf` wrapping. That's not the problem.
 
-The patterns below should be second nature, not a pre-flight checklist. Apply them as you write, not as a separate planning phase. If the request is simple, write simple code. If it's complex, the design emerges as you go.
+The problem is **architectural taste** -- the design decisions that happen before and during coding that make Go programs feel like Go, not translated Java. This skill focuses exclusively on those decisions.
 
-## Design Instincts
+## 1. Zero-Value Design (most commonly missed)
 
-These should be automatic when writing Go. Not a checklist to consult -- habits that shape every line.
+Every struct you define: ask "does `var x MyType` work?" If calling a method on a zero-value instance panics or does nothing useful, redesign.
 
-### 1. Type Design -- Start With Zero Values
-
-For every struct you're about to define, ask: what happens if someone writes `var x MyType` and starts calling methods? If the answer is "panic" or "nothing works," you have a design problem.
-
-**The goal:** make the zero value useful whenever possible.
-
-- Maps inside structs: lazy-initialize on first write, not in a constructor
-- Slices: nil slice is fine, it behaves like empty
-- Pointers to dependencies: nil means "use default" (like `http.Client` does)
-- Mutexes: zero value is unlocked, ready to use
+**The pattern:** lazy-initialize maps and slices on first write. Use nil pointers to mean "use default." Design so `new(T)` returns something usable.
 
 ```go
-// Design question: Does *Board work at zero value?
-// Answer: No -- tasks is nil map, subscribers is nil map.
-// Fix: lazy-init in methods, not in a mandatory constructor.
-
-type Board struct {
-    mu          sync.RWMutex
-    tasks       map[string]*Task
-    subscribers map[string]chan Event
+type Store struct {
+    mu    sync.RWMutex
+    items map[string]*Item  // nil is fine -- lazy-init on write
 }
 
-func (b *Board) Add(t *Task) {
-    b.mu.Lock()
-    defer b.mu.Unlock()
-    if b.tasks == nil {
-        b.tasks = make(map[string]*Task)
+func (s *Store) Put(key string, item *Item) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if s.items == nil {
+        s.items = make(map[string]*Item)
     }
-    b.tasks[t.ID] = t
-    b.notify(Event{Type: "added", Task: t})
+    s.items[key] = item
+}
+
+func (s *Store) Get(key string) (*Item, bool) {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+    item, ok := s.items[key]  // nil map read returns zero value -- safe
+    return item, ok
 }
 ```
 
-When a constructor IS required (external resource handles, validated config), name it `New` if the package has one primary type, or `NewThing` if multiple. Never `NewPkgThing` -- the package name is already in the import.
+Standard library examples: `bytes.Buffer`, `sync.Mutex`, `http.Client` -- all usable at zero value. Design your types the same way.
 
-### 2. Interface Discovery -- Define at the Consumer
+When a constructor IS required (network connections, validated config), that's fine -- but it should be the exception. Name it `New` (one type per package) or `NewThing` (multiple types).
 
-This is the most common Go design mistake: defining big interfaces at the provider, Java-style. In Go, interfaces are discovered at the point of use.
+## 2. Interface Discovery (biggest architectural difference from Java/Python)
+
+In Go, interfaces are defined where they're **consumed**, not where they're **implemented**. This is the single most important Go design principle and the one most commonly violated.
 
 **The process:**
-1. Write your function signatures first (even as mental pseudocode)
-2. Look at what methods each function actually calls on its arguments
-3. That's your interface -- define it locally at the consumer
-4. The concrete type satisfies it implicitly
+1. You have a function that needs to call methods on something
+2. What methods does it actually call? One? Two?
+3. Define a 1-2 method interface right there, in the consuming package
+4. The concrete type satisfies it implicitly -- no `implements` keyword
 
 ```go
-// Wrong thinking: "I need a Storage interface for my database"
-type Storage interface {  // 6 methods, defined in the storage package
-    Get(id string) (*Item, error)
-    Put(item *Item) error
-    Delete(id string) error
-    List() ([]*Item, error)
-    Search(q string) ([]*Item, error)
-    Close() error
+// Your handler package needs to fetch users. It calls ONE method.
+// Define the interface HERE, not in the database package.
+type UserFetcher interface {
+    Fetch(ctx context.Context, id string) (*User, error)
 }
 
-// Right thinking: "This function needs to read items. What does it call?"
-// In the handler package, where it's consumed:
-type ItemGetter interface {
-    Get(id string) (*Item, error)
-}
-
-func HandleGetItem(store ItemGetter, id string) (*Item, error) {
-    return store.Get(id)
-}
-// Any concrete type with a Get method works. Testing is trivial.
-```
-
-**One-method interfaces** get the `-er` suffix: `Reader`, `Writer`, `Closer`, `Stringer`. Multi-method interfaces describe a role: `Handler`, `Conn`.
-
-**Accept interfaces, return structs.** Functions should take the narrowest interface they need and return concrete types so callers get the full API.
-
-### 3. Package Boundary Design -- Think Like the Caller
-
-Before creating any file, imagine the import statement and every `pkg.Name` the caller will type.
-
-**The test:** say the full qualified name out loud. Does it read well?
-
-- `http.Client` -- yes
-- `http.HTTPClient` -- no, stutter
-- `ring.New()` -- yes, clear
-- `ring.NewRing()` -- no, redundant
-- `bufio.Reader` -- yes
-- `bufio.BufReader` -- no, package already said "buf"
-
-**Package naming rules:**
-- Lowercase, single word, no underscores, no mixedCaps
-- The package name IS the namespace -- use it
-- `util`, `common`, `helpers` are design smells. Name for the domain: `auth`, `billing`, `render`
-
-**Getter naming:** if the field is `owner`, the getter is `Owner()` (not `GetOwner()`). The setter is `SetOwner()`.
-
-### 4. Data Flow Architecture -- Channels vs Mutexes
-
-Before writing any concurrent code, map out the data flow:
-
-**Who produces data? Who consumes it? Does ownership transfer?**
-
-| Situation | Use |
-|-----------|-----|
-| Data ownership transfers between goroutines | Channel |
-| Protecting shared state (counter, map, cache) | `sync.Mutex` or `sync.RWMutex` |
-| Signaling completion or cancellation | Channel, `context.Context`, or `sync.WaitGroup` |
-| One-time initialization | `sync.Once` |
-| Bounding concurrency (max N goroutines active) | Buffered channel as semaphore |
-| Fixed worker pool processing a queue | N goroutines reading from one channel |
-
-**The mantra:** "Do not communicate by sharing memory; share memory by communicating." But don't dogmatize it -- mutexes are right for simple shared state.
-
-```go
-// Worker pool: fixed goroutines, bounded concurrency, clean shutdown
-func process(ctx context.Context, jobs <-chan Job, results chan<- Result, n int) {
-    var wg sync.WaitGroup
-    for range n {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            for {
-                select {
-                case <-ctx.Done():
-                    return
-                case job, ok := <-jobs:
-                    if !ok {
-                        return
-                    }
-                    results <- handle(job)
-                }
-            }
-        }()
+func HandleGetUser(store UserFetcher, id string) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        user, err := store.Fetch(r.Context(), id)
+        // ...
     }
-    wg.Wait()
-    close(results)
 }
 ```
 
-Never spawn unbounded goroutines. Gate with a semaphore or use a fixed pool.
+**Why this matters:** any concrete type with a `Fetch` method works. Your database implementation, a mock for tests, a cache wrapper -- they all satisfy `UserFetcher` without knowing it exists.
 
-### 5. Error Flow Design -- The Shape of the Function
+**Red flags you're doing it wrong:**
+- An interface with 5+ methods
+- An interface defined in the same package as its only implementation
+- An interface named `IFoo` or `FooInterface`
+- A function accepting a concrete type it could accept as an interface
 
-Before implementing a function, think about its error shape:
+**Accept interfaces, return structs.** Your function parameters should be narrow interfaces. Your return types should be concrete structs so callers get the full API.
 
-**The rule:** errors peel off to the right. The happy path runs straight down the left edge. If your function's main logic is indented, refactor.
+## 3. Composition via Embedding (Go's alternative to inheritance)
 
-```go
-func process(name string) error {
-    f, err := os.Open(name)
-    if err != nil {
-        return fmt.Errorf("open %s: %w", name, err)
-    }
-    defer f.Close()
+Embed a type to promote ALL its methods to the outer type. This is how Go does composition -- no inheritance, no subclassing, just automatic delegation.
 
-    data, err := io.ReadAll(f)
-    if err != nil {
-        return fmt.Errorf("read %s: %w", name, err)
-    }
-
-    return save(data)
-}
-```
-
-**Error design decisions:**
-- Can the caller recover? Use a sentinel (`var ErrNotFound = errors.New(...)`) or custom type
-- Is the error just informational? Wrap with `fmt.Errorf("context: %w", err)`
-- Error strings: lowercase, no punctuation, prefix with origin (`"image: unknown format"`)
-- Never discard errors silently. If you can't return it, log it
-
----
-
-## Hard Rules -- Things Go Developers Never Do
-
-These are non-negotiable. Violating any of these is an instant tell that the code was not written by a Go developer.
-
-1. **Never `os.Exit()` outside of `main()`.** Return errors up the call stack. Only `main()` decides to exit. Helper functions that call `os.Exit` are untestable and prevent defer cleanup. In cobra apps, `RunE` returns errors -- let cobra handle the exit code.
-
-2. **Never hand-roll sorting.** Use `sort.Slice` or `slices.SortFunc`. Writing a manual insertion sort or bubble sort loop signals "translated from another language." If `sort.Slice` exists, use it.
-
-3. **Interface methods must not return concrete implementation types.** If an interface method returns `*ssh.Session`, it's not really an interface -- it's permanently coupled to one implementation. Return `io.Reader`, `io.ReadCloser`, or another interface. The caller should not need to know what's underneath.
-
-4. **Use named types for closed sets of values.** Event types, states, categories -- any finite set of known values gets a named type with `iota` or string constants. Never use raw strings like `"added"`, `"removed"` as event types.
-
-    ```go
-    type EventType string
-    const (
-        EventAdded   EventType = "added"
-        EventToggled EventType = "toggled"
-    )
-    ```
-
-5. **Use `encoding/json` for structured data.** Never invent custom delimited formats (pipe-separated, comma-separated). Go's standard library has `encoding/json`, `encoding/csv`, `encoding/gob`. Use them.
-
-6. **Use the standard library reflexively.** Before writing a loop that does something that sounds like it should exist, check `sort`, `slices`, `strings`, `bytes`, `maps`, `sync`, `io`. Go developers reach for stdlib instinctively. If you're reimplementing something, you're probably doing it wrong.
-
-7. **Never silently discard errors with `_`.** If the error truly cannot happen, add a comment explaining why. If you're discarding it for convenience, you're hiding bugs. Same for comma-ok returns -- if the `bool` carries semantic meaning, use it.
-
-8. **Domain types use correct Go types.** Ports are `int`, timestamps are `time.Time`, durations are `time.Duration`. Parse strings to typed values at the boundary (when reading config, env vars, APIs). Never pass strings through the domain layer when a more specific type exists.
-
----
-
-## Supporting Patterns
-
-These patterns support the design decisions above. Read `references/effective-go-patterns.md` for full examples and edge cases on any of these.
-
-### Embedding -- When to Reach for It
-
-Embed a type when you want ALL its methods promoted to the outer type. This is Go's composition mechanism -- not inheritance, but delegation with automatic forwarding.
-
-**Reach for embedding when:**
-- Wrapping an `http.ServeMux` or `http.Server` with extra behavior
-- Adding methods to a logger (`*log.Logger` embedded in a service type)
-- Composing interfaces (`ReadWriter` embeds `Reader` + `Writer`)
-- Building test mocks that satisfy a large interface but only override 1-2 methods
-- A struct "is a" something with extra state (e.g., `TimedMutex` embeds `sync.Mutex`)
+**When to embed:**
 
 ```go
-// Embed when you want all methods promoted
+// Wrap http.ServeMux with extra behavior
 type Server struct {
-    *http.ServeMux           // promotes Handle, HandleFunc, ServeHTTP
+    *http.ServeMux  // promotes Handle, HandleFunc, ServeHTTP
     timeout time.Duration
 }
 
-// Embed for test mocks -- satisfy the interface, override what you need
-type mockStore struct {
-    *RealStore              // satisfies all methods
-    getFn func(string) Item // override just Get
+// Add logging to any type
+type Service struct {
+    *log.Logger  // promotes Print, Printf, Println, etc.
+    db *sql.DB
 }
-func (m *mockStore) Get(id string) Item { return m.getFn(id) }
+svc.Println("starting up...")  // calls the embedded Logger
 
-// Embed interfaces to compose them
+// Compose interfaces
 type ReadWriteCloser interface {
     io.Reader
     io.Writer
     io.Closer
 }
+
+// Test mocks -- satisfy a big interface, override 1-2 methods
+type mockDB struct {
+    *RealDB                    // satisfies everything
+    fetchFn func(string) *User // override just Fetch
+}
+func (m *mockDB) Fetch(id string) *User { return m.fetchFn(id) }
 ```
 
-**Don't embed** when you only need 1-2 methods -- write explicit forwarding instead. Embedding promotes EVERYTHING, which can expose methods you didn't intend.
+**When NOT to embed:** if you only need 1-2 methods from the embedded type, write explicit forwarding instead. Embedding promotes everything, which can expose methods you didn't intend.
 
-### Composite Literals -- Named Fields Always
+## 4. Named Types for Value Sets
+
+Any finite set of known values (event types, states, statuses) gets a named type. Never use raw strings.
 
 ```go
-cfg := Config{
-    Host:    "localhost",
-    Port:    8080,
-    Timeout: 10 * time.Second,
-}
+type Status string
+const (
+    StatusPending  Status = "pending"
+    StatusRunning  Status = "running"
+    StatusComplete Status = "complete"
+    StatusFailed   Status = "failed"
+)
+
+// Now the compiler helps you -- you can't accidentally pass "pneding"
+func (j *Job) SetStatus(s Status) { j.status = s }
 ```
 
-Positional fields break silently when struct fields are reordered. Named fields are self-documenting and safe.
+This applies to event types, states, categories, roles -- anything where the set of valid values is known at design time.
 
-### new vs make
+## 5. Use the Standard Library
 
-- `new(T)` -- zeroed memory for any type, returns `*T`
-- `make(T, args)` -- initialized slices, maps, channels only, returns `T`
+Before writing a loop, check if the standard library already does it. Go developers reach for `sort.Slice`, `slices.SortFunc`, `strings.Builder`, `maps.Keys`, `sync.Pool` without thinking. If you find yourself implementing something that sounds like it should exist, it does.
 
-### Defer -- Immediately After Acquisition
+Never hand-roll sorting. Never reimplement string joining. Never build your own sync primitives.
 
-```go
-mu.Lock()
-defer mu.Unlock()
+## Hard Rules
 
-f, err := os.Open(path)
-if err != nil {
-    return err
-}
-defer f.Close()
-```
+These are non-negotiable tells that code wasn't written by a Go developer:
 
-Never defer in a loop -- defer runs at function return, not loop iteration. Extract the loop body to a separate function.
+- **No `os.Exit()` outside `main()`** -- return errors up the stack
+- **No `GetFoo()` getters** -- the getter for `name` is `Name()`, setter is `SetName()`
+- **No leaked concrete types in interfaces** -- if an interface method returns `*ssh.Session`, it's not really an interface. Return `io.Reader` or `io.ReadCloser`
+- **Domain types match the domain** -- ports are `int`, timestamps are `time.Time`, not strings
 
-### Context Propagation
-
-- Always first parameter, always named `ctx`
-- Never store in a struct
-- Pass at call time, not construction time
-
----
-
-## Quick-Check
-
-Before finalizing Go code, verify:
-
-- [ ] Zero values: would `var x T` panic? If so, fix or document
-- [ ] Interfaces: defined at consumer, not provider? As small as possible?
-- [ ] Package names: does `pkg.ExportedName` read well with no stutter?
-- [ ] Error flow: happy path on the left edge? Errors wrap with context?
-- [ ] Concurrency: bounded goroutines? Clear ownership model?
-- [ ] Functions: accept narrowest interface, return concrete type?
-
-For full pattern reference with edge cases: `references/effective-go-patterns.md`
+For full pattern reference: `references/effective-go-patterns.md`

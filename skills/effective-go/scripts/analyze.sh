@@ -234,6 +234,61 @@ else
     comment_ratio="0.00"
 fi
 
+# --- Architecture metrics ---
+
+# has_embedding: any struct in these files contains an anonymous/embedded field
+# (a line inside a struct body that is just a type with no field name, e.g. sync.Mutex or *http.ServeMux)
+has_embedding=false
+for f in "${non_test_go_files[@]}"; do
+    # Lines that are purely a package-qualified type (optionally pointer), no field name prefix
+    # Method signatures always contain () so they won't match this pattern
+    n=$(grep -cE '^\s+\*?[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*\s*$' "$f" 2>/dev/null) || n=0
+    if [[ $n -gt 0 ]]; then
+        has_embedding=true
+        break
+    fi
+done
+
+# typed_constants: count of "type X string" or "type X int" declarations (exported names only)
+# These are the building blocks of enum-style typed constants in Go
+typed_constants=0
+for f in "${non_test_go_files[@]}"; do
+    n=$(grep -cE '^\s*type\s+[A-Z][A-Za-z0-9]*\s+(string|int)\s*$' "$f" 2>/dev/null) || n=0
+    typed_constants=$((typed_constants + n))
+done
+
+# lazy_init_maps: count of zero-value map design pattern
+# Pattern: if x.field == nil { x.field = make(map
+lazy_init_maps=0
+for f in "${non_test_go_files[@]}"; do
+    n=$(grep -cP 'if\s+\w+\.\w+\s*==\s*nil\s*\{\s*$' "$f" 2>/dev/null) || n=0
+    if [[ $n -gt 0 ]]; then
+        # Verify associated make(map on the next physical line via awk
+        make_map_count=$(awk '
+            /if[[:space:]]+[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*[[:space:]]*==[[:space:]]*nil[[:space:]]*\{[[:space:]]*$/ {
+                found = 1
+                next
+            }
+            found == 1 {
+                if ($0 ~ /make\(map/) count++
+                found = 0
+            }
+            END { print count+0 }
+        ' "$f") || make_map_count=0
+        lazy_init_maps=$((lazy_init_maps + make_map_count))
+    fi
+done
+
+# constructor_count: count of New( or NewXxx( functions
+constructor_count=0
+for f in "${non_test_go_files[@]}"; do
+    n=$(grep -cE '^func\s+New[A-Z]?[A-Za-z0-9]*\s*\(' "$f" 2>/dev/null) || n=0
+    constructor_count=$((constructor_count + n))
+done
+
+# arch_packages: count of distinct package declarations (same logic as metrics.packages)
+arch_packages=$packages
+
 # --- Output JSON ---
 cat <<ENDJSON
 {
@@ -255,6 +310,13 @@ cat <<ENDJSON
     "interfaces": $interfaces_json,
     "exported_types": $exported_types,
     "comment_ratio": $comment_ratio
+  },
+  "architecture": {
+    "has_embedding": $has_embedding,
+    "typed_constants": $typed_constants,
+    "lazy_init_maps": $lazy_init_maps,
+    "constructor_count": $constructor_count,
+    "packages": $arch_packages
   }
 }
 ENDJSON

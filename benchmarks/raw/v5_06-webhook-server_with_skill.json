@@ -1,0 +1,28 @@
+{
+  "compiles": true,
+  "vet_clean": true,
+  "vet_warnings": 0,
+  "anti_patterns": {
+    "os_exit_outside_main": 0,
+    "get_prefix_getters": 0,
+    "hand_rolled_sort": false,
+    "silent_error_discard": 0,
+    "raw_string_enums": false,
+    "string_typed_ports": false
+  },
+  "metrics": {
+    "total_lines": 311,
+    "files": 4,
+    "packages": 1,
+    "interfaces": [{"name":"EventReader","methods":3},{"name":"Handler","methods":1},{"name":"EventWriter","methods":1}],
+    "exported_types": 7,
+    "comment_ratio": 0.07
+  },
+  "architecture": {
+    "has_embedding": false,
+    "typed_constants": 0,
+    "lazy_init_maps": 0,
+    "constructor_count": 3,
+    "packages": 1
+  }
+}
