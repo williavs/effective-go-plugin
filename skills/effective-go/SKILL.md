@@ -145,6 +145,7 @@ These are non-negotiable tells that code wasn't written by a Go developer:
 
 - **No `os.Exit()` outside `main()`** -- return errors up the stack
 - **No `GetFoo()` getters** -- the getter for `name` is `Name()`, setter is `SetName()`
+- **No concrete dependency parameters** -- any function accepting a store, client, or service takes a narrow interface defined in the consuming package, not the concrete type
 - **No leaked concrete types in interfaces** -- if an interface method returns `*ssh.Session`, it's not really an interface. Return `io.Reader` or `io.ReadCloser`
 - **Domain types match the domain** -- ports are `int`, timestamps are `time.Time`, not strings
 
